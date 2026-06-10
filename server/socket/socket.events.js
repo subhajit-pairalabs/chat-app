@@ -8,8 +8,13 @@ module.exports = (io, socket) => {
   // ── Online presence ──────────────────────────────────────────────────────────
   Presence.online(userId, socket.id);
 
-  // Notify contacts this user is online (optional — clients subscribe to this)
+  // Notify all others that this user is online
   socket.broadcast.emit('user_online', { userId });
+
+  // Send current online user list to the newly connected socket (so they see who's already online)
+  Presence.getOnlineUsers().then(onlineList => {
+    socket.emit('online_users_snapshot', { userIds: onlineList });
+  }).catch(err => console.error('[socket] failed to get online users', err));
 
   // ── Messaging ────────────────────────────────────────────────────────────────
   socket.on('send_message', (data) => ChatService.sendMessage(io, socket, data));
@@ -25,11 +30,13 @@ module.exports = (io, socket) => {
 
   // ── Groups ───────────────────────────────────────────────────────────────────
   socket.on('join_group', (groupId) => {
+    if (!groupId) return;
     socket.join('group:' + groupId);
     socket.emit('joined_group', { groupId });
   });
 
   socket.on('leave_group', (groupId) => {
+    if (!groupId) return;
     socket.leave('group:' + groupId);
     socket.emit('left_group', { groupId });
   });

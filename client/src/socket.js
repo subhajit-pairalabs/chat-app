@@ -9,15 +9,24 @@ export function getSocket() {
 export function connectSocket(token) {
   if (socket?.connected) return socket;
 
+  // Disconnect any stale socket before creating a new one
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+
   socket = io('/', {
     auth: { token },
-    reconnectionAttempts: 5,
+    reconnectionAttempts: 10,
     reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
     transports: ['websocket', 'polling']
   });
 
   socket.on('connect', () => {
     console.log('[socket] connected', socket.id);
+    // Sync messages on every reconnect (handles reconnects after network drop)
+    socket.emit('sync_messages');
   });
 
   socket.on('connect_error', (err) => {

@@ -3,6 +3,7 @@ const pool = require('../config/db');
 class Conversation {
   /**
    * List all conversations (private + group) for a user, sorted by latest activity.
+   * Returns other_username for private chats and group_name for groups.
    */
   static async listForUser(userId) {
     const { rows } = await pool.query(
@@ -10,43 +11,72 @@ class Conversation {
          c.id,
          c.type,
          c.group_name,
+         c.other_user_id,
+         u.username          AS other_username,
          c.created_at,
-         -- last message preview
-         m.content        AS last_message,
-         m.created_at     AS last_message_at,
-         m.sender_id      AS last_message_sender,
-         -- unread count
-         (SELECT COUNT(*) FROM messages
-          WHERE receiver_id = $1
-            AND status != 'read'
-            AND (
-              (c.type = 'private' AND sender_id = c.other_user_id)
-              OR (c.type = 'group' AND group_id = c.id)
-            )
+         m.content           AS last_message,
+         m.created_at        AS last_message_at,
+         m.sender_id         AS last_message_sender,
+         (
+           SELECT COUNT(*)::int FROM messages
+           WHERE receiver_id = $1::uuid
+             AND status != 'read'
+             AND deleted_at IS NULL
+             AND (
+               (c.type = 'private' AND sender_id = c.other_user_id)
+               OR (c.type = 'group' AND group_id = c.id::uuid)
+             )
          ) AS unread_count
        FROM (
-         -- private conversations
+         -- private conversations: one row per unique peer
          SELECT
-           CONCAT(LEAST(sender_id, receiver_id), '-', GREATEST(sender_id, receiver_id)) AS id,
-           'private' AS type,
-           NULL AS group_name,
-           MIN(created_at) AS created_at,
-           CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END AS other_user_id
-         FROM messages
-         WHERE type = 'private' AND (sender_id = $1 OR receiver_id = $1)
-         GROUP BY sender_id, receiver_id
+           CONCAT(
+             LEAST($1::text, peer.user_id::text),
+             '-',
+             GREATEST($1::text, peer.user_id::text)
+           )                                            AS id,
+           'private'                                    AS type,
+           NULL::text                                   AS group_name,
+           MIN(m2.created_at)                           AS created_at,
+           peer.user_id                                 AS other_user_id
+         FROM messages m2
+         CROSS JOIN LATERAL (
+           SELECT
+             CASE WHEN m2.sender_id = $1::uuid
+                  THEN m2.receiver_id
+                  ELSE m2.sender_id
+             END AS user_id
+         ) peer
+         WHERE m2.type = 'private'
+           AND (m2.sender_id = $1::uuid OR m2.receiver_id = $1::uuid)
+           AND m2.deleted_at IS NULL
+         GROUP BY peer.user_id
+
          UNION ALL
+
          -- group conversations
-         SELECT id::text, 'group', name, created_at, NULL
-         FROM groups
-         WHERE id IN (
-           SELECT group_id FROM group_members WHERE user_id = $1::uuid
-         )
+         SELECT
+           g.id::text,
+           'group',
+           g.name,
+           g.created_at,
+           NULL::uuid
+         FROM groups g
+         JOIN group_members gm ON gm.group_id = g.id
+         WHERE gm.user_id = $1::uuid
        ) c
+       LEFT JOIN users u ON u.id = c.other_user_id
        LEFT JOIN LATERAL (
-         SELECT content, created_at, sender_id FROM messages
-         WHERE (
-           (c.type = 'private' AND (sender_id = $1 OR receiver_id = $1))
+         SELECT content, created_at, sender_id
+         FROM messages
+         WHERE deleted_at IS NULL AND (
+           (
+             c.type = 'private'
+             AND (
+               (sender_id = $1::uuid AND receiver_id = c.other_user_id)
+               OR (sender_id = c.other_user_id AND receiver_id = $1::uuid)
+             )
+           )
            OR (c.type = 'group' AND group_id = c.id::uuid)
          )
          ORDER BY created_at DESC LIMIT 1
@@ -66,14 +96,14 @@ class Conversation {
       await client.query('BEGIN');
 
       const { rows: [group] } = await client.query(
-        `INSERT INTO groups (name, created_by) VALUES ($1, $2) RETURNING *`,
+        `INSERT INTO groups (name, created_by) VALUES ($1, $2::uuid) RETURNING *`,
         [name, creatorId]
       );
 
       const allMembers = [...new Set([creatorId, ...memberIds])];
       for (const uid of allMembers) {
         await client.query(
-          `INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          `INSERT INTO group_members (group_id, user_id) VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING`,
           [group.id, uid]
         );
       }
@@ -96,7 +126,7 @@ class Conversation {
       `SELECT g.*, array_agg(gm.user_id) AS member_ids
        FROM groups g
        JOIN group_members gm ON gm.group_id = g.id
-       WHERE g.id = $1
+       WHERE g.id = $1::uuid
        GROUP BY g.id`,
       [groupId]
     );
@@ -108,7 +138,7 @@ class Conversation {
    */
   static async addMember(groupId, userId) {
     await pool.query(
-      `INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      `INSERT INTO group_members (group_id, user_id) VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING`,
       [groupId, userId]
     );
   }
@@ -118,7 +148,7 @@ class Conversation {
    */
   static async removeMember(groupId, userId) {
     await pool.query(
-      `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`,
+      `DELETE FROM group_members WHERE group_id = $1::uuid AND user_id = $2::uuid`,
       [groupId, userId]
     );
   }

@@ -6,23 +6,53 @@ import styles from './MessagePane.module.css';
 
 export default function MessagePane() {
   const { user } = useAuth();
-  const { activeId, activeType, messages, sendMessage, sendTyping, typing } = useChat();
+  const {
+    activeId,
+    activeType,
+    activeConversation,  // FIX BUG-05B: use resolved name from context
+    messages,
+    sendMessage,
+    sendTyping,
+    typing,
+    onlineUsers
+  } = useChat();
+
   const [input, setInput] = useState('');
-  const bottomRef = useRef(null);
+  const bottomRef     = useRef(null);
   const typingTimeout = useRef(null);
+
   const paneMessages = messages[activeId] || [];
-  const isTyping = Object.entries(typing).some(([id, t]) => id !== user.id && t);
+
+  // Determine who is typing in this conversation
+  const isTyping = Object.entries(typing).some(([key, t]) => {
+    if (!t) return false;
+    if (activeType === 'group') return key === activeId; // group typing key
+    return key !== user.id; // private: any other user typing
+  });
+
+  // FIX BUG-05B: display the resolved name
+  const headerName = activeType === 'group'
+    ? (activeConversation?.group_name || 'Group')
+    : (activeConversation?.other_username || '…');
+
+  const isOnline = activeType === 'private' && onlineUsers.has(activeId);
 
   // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [paneMessages.length]);
 
+  // FIX: cleanup typing timeout on unmount
+  useEffect(() => {
+    return () => clearTimeout(typingTimeout.current);
+  }, []);
+
   const handleSend = useCallback(() => {
     if (!input.trim()) return;
     sendMessage(input);
     setInput('');
     sendTyping(false);
+    clearTimeout(typingTimeout.current);
   }, [input, sendMessage, sendTyping]);
 
   function handleKeyDown(e) {
@@ -52,12 +82,17 @@ export default function MessagePane() {
       {/* Header */}
       <div className={styles.header}>
         <div className={styles.headerAvatar}>
-          {activeType === 'group' ? '👥' : activeId?.[0]?.toUpperCase() || '?'}
+          {activeType === 'group' ? '👥' : headerName?.[0]?.toUpperCase() || '?'}
+          {isOnline && <span className={styles.onlineDot} />}
         </div>
         <div>
-          <div className={styles.headerName}>{activeId}</div>
+          {/* FIX BUG-05B: show resolved name */}
+          <div className={styles.headerName}>{headerName}</div>
           <div className={styles.headerSub}>
-            {activeType === 'group' ? 'Group' : 'Direct message'}
+            {activeType === 'group'
+              ? 'Group chat'
+              : isOnline ? 'Online' : 'Offline'
+            }
           </div>
         </div>
       </div>
@@ -65,11 +100,11 @@ export default function MessagePane() {
       {/* Messages */}
       <div className={styles.messages}>
         {grouped.length === 0 && (
-          <p className={styles.noMessages}>No messages yet — say hello!</p>
+          <p className={styles.noMessages}>No messages yet — say hello! 👋</p>
         )}
         {grouped.map((msg) => (
           <Message
-            key={msg.messageId}
+            key={msg.messageId || msg.id}
             msg={msg}
             isMine={msg.senderId === user.id}
           />

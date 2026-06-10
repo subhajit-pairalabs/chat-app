@@ -1,16 +1,14 @@
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 const pool = require('../config/db');
 const { v4: uuidv4 } = require('uuid');
-const crypto = require('crypto');
 
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password + process.env.JWT_SECRET).digest('hex');
-}
+const SALT_ROUNDS = 12;
 
 function signToken(userId) {
   return jwt.sign(
     { id: userId },
-    process.env.JWT_SECRET || 'dev-secret',
+    process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 }
@@ -24,17 +22,23 @@ async function register(req, res, next) {
     if (!username || !password) {
       return res.status(400).json({ error: 'username and password are required' });
     }
+    if (typeof username !== 'string' || username.trim().length < 2 || username.trim().length > 30) {
+      return res.status(400).json({ error: 'username must be 2–30 characters' });
+    }
+    if (typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'password must be at least 6 characters' });
+    }
 
-    const existing = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+    const existing = await pool.query('SELECT id FROM users WHERE username = $1', [username.trim()]);
     if (existing.rows.length) {
       return res.status(409).json({ error: 'Username already taken' });
     }
 
     const id = uuidv4();
-    const hash = hashPassword(password);
+    const hash = await bcrypt.hash(password, SALT_ROUNDS);
     const { rows: [user] } = await pool.query(
       'INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3) RETURNING id, username, created_at',
-      [id, username, hash]
+      [id, username.trim(), hash]
     );
 
     res.status(201).json({ token: signToken(user.id), user });
@@ -58,7 +62,12 @@ async function login(req, res, next) {
       [username]
     );
 
-    if (!user || user.password_hash !== hashPassword(password)) {
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -77,7 +86,7 @@ async function login(req, res, next) {
 async function me(req, res, next) {
   try {
     const { rows: [user] } = await pool.query(
-      'SELECT id, username, created_at FROM users WHERE id = $1',
+      'SELECT id, username, created_at FROM users WHERE id = $1::uuid',
       [req.user.id]
     );
     if (!user) return res.status(404).json({ error: 'User not found' });

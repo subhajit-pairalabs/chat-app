@@ -19,20 +19,21 @@ async function start() {
     }
 
     try {
-      if (data.type === 'new_message') {
+      // 'event' field routes the action; 'messageType' carries 'private'|'group'
+      if (data.event === 'new_message') {
         await Message.create({
-          messageId: data.messageId,
-          senderId:  data.senderId,
+          messageId:  data.messageId,
+          senderId:   data.senderId,
           receiverId: data.receiverId || null,
-          groupId:   data.groupId || null,
-          content:   data.content || data.message,
-          type:      data.type === 'new_message' ? (data.messageType || 'private') : data.type,
-          status:    data.status || 'sent'
+          groupId:    data.groupId   || null,
+          content:    data.content,
+          type:       data.messageType || 'private',
+          status:     data.status || 'sent'
         });
-        console.log(`[worker] saved message ${data.messageId}`);
+        console.log(`[worker] saved message ${data.messageId} type=${data.messageType}`);
       }
 
-      if (data.type === 'status_update') {
+      if (data.event === 'status_update') {
         await Message.updateStatus(data.messageId, data.status);
         console.log(`[worker] updated status ${data.messageId} → ${data.status}`);
       }

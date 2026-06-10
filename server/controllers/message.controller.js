@@ -47,15 +47,26 @@ async function sendMessage(req, res, next) {
   try {
     const { receiverId, groupId, content, type = 'private' } = req.body;
 
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ error: 'content is required' });
+    }
+    if (type === 'private' && !receiverId) {
+      return res.status(400).json({ error: 'receiverId is required for private messages' });
+    }
+    if (type === 'group' && !groupId) {
+      return res.status(400).json({ error: 'groupId is required for group messages' });
+    }
+
     const messageId = uuidv4();
     const payload = {
+      event:       'new_message',  // routing key for worker
+      messageType: type,           // 'private' | 'group'
       messageId,
-      senderId: req.user.id,
-      receiverId: receiverId || null,
-      groupId: groupId || null,
-      content,
-      type,
-      status: 'sent'
+      senderId:    req.user.id,
+      receiverId:  receiverId || null,
+      groupId:     groupId || null,
+      content:     content.trim(),
+      status:      'sent'
     };
 
     // Enqueue for async persistence

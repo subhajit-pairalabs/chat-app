@@ -8,6 +8,10 @@ class SyncService {
 
     if (socketId && messages.length) {
       io.to(socketId).emit('offline_messages', messages);
+
+      // Mark all synced messages as delivered to prevent re-sending on next connect
+      const messageIds = messages.map(m => m.id);
+      await Message.markManyDelivered(messageIds);
     }
 
     return messages.length;
