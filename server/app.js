@@ -65,8 +65,10 @@ app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 // ── Global error handler ──────────────────────────────────────────────────────
 app.use(errorHandler);
 
-// ── Socket.IO ─────────────────────────────────────────────────────────────────
-socketGateway(server);
+// ── Socket.IO ─────────────────────────────────────────────────────────────
+const io = socketGateway(server);
+// Make io available to controllers via app.locals
+app.locals.io = io;
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;

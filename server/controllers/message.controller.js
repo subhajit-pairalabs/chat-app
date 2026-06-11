@@ -102,18 +102,40 @@ async function updateMessageStatus(req, res, next) {
 
 /**
  * DELETE /api/messages/:messageId
- * Soft-delete a message (only sender can delete)
+ * Soft-delete a message (only sender can delete).
+ * Also broadcasts message_deleted via Socket.IO for real-time updates.
  */
 async function deleteMessage(req, res, next) {
   try {
     const { messageId } = req.params;
-    const deleted = await Message.softDelete(messageId, req.user.id);
 
+    // Get meta before deleting so we can broadcast to the right room
+    const meta = await Message.getMessageMeta(messageId);
+    if (!meta) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+    if (meta.sender_id !== req.user.id) {
+      return res.status(403).json({ error: 'Not authorized to delete this message' });
+    }
+
+    const deleted = await Message.softDelete(messageId, req.user.id);
     if (!deleted) {
       return res.status(404).json({ error: 'Message not found or not owned by you' });
     }
 
-    res.json({ message: 'Message deleted' });
+    // Broadcast deletion via Socket.IO for real-time update
+    const io = req.app.locals.io;
+    if (io) {
+      const payload = { messageId, deletedAt: deleted.deleted_at };
+      if (meta.type === 'private') {
+        io.to(`user:${meta.sender_id}`).emit('message_deleted', payload);
+        io.to(`user:${meta.receiver_id}`).emit('message_deleted', payload);
+      } else if (meta.type === 'group') {
+        io.to('group:' + meta.group_id).emit('message_deleted', payload);
+      }
+    }
+
+    res.json({ message: 'Message deleted', messageId, deletedAt: deleted.deleted_at });
   } catch (err) {
     next(err);
   }

@@ -1,5 +1,30 @@
 const pool = require('../config/db');
 
+/**
+ * Normalize a DB row (snake_case) to the camelCase shape the client expects.
+ * This ensures REST API responses are identical in shape to real-time socket payloads,
+ * which fixes the "messages appear on left side after refresh" bug (Issue 1).
+ */
+function normalize(row) {
+  if (!row) return null;
+  return {
+    messageId:       row.id,
+    senderId:        row.sender_id,
+    receiverId:      row.receiver_id   || null,
+    groupId:         row.group_id      || null,
+    content:         row.deleted_at ? null : row.content,
+    messageType:     row.type,
+    type:            row.type,
+    status:          row.status,
+    sender_username: row.sender_username,
+    createdAt:       row.created_at,
+    created_at:      row.created_at,
+    // Soft-delete: expose flag instead of hiding the row so the UI can show placeholder
+    is_deleted:      !!row.deleted_at,
+    deleted_at:      row.deleted_at || null,
+  };
+}
+
 class Message {
   /**
    * Persist a single message row.
@@ -22,14 +47,16 @@ class Message {
       `SELECT m.*, u.username AS sender_username
        FROM messages m
        JOIN users u ON u.id = m.sender_id
-       WHERE m.id = $1::uuid AND m.deleted_at IS NULL`,
+       WHERE m.id = $1::uuid`,
       [id]
     );
-    return rows[0] || null;
+    return normalize(rows[0]) || null;
   }
 
   /**
    * All messages in a private conversation between two users, paginated.
+   * NOTE: deleted messages are INCLUDED (with is_deleted flag) so the UI
+   * can show the "This message was deleted" placeholder consistently.
    */
   static async findByConversation(userA, userB, { limit = 50, before } = {}) {
     const params = [userA, userB, limit];
@@ -44,7 +71,6 @@ class Message {
        FROM messages m
        JOIN users u ON u.id = m.sender_id
        WHERE m.type = 'private'
-         AND m.deleted_at IS NULL
          AND ((m.sender_id = $1::uuid AND m.receiver_id = $2::uuid)
                OR (m.sender_id = $2::uuid AND m.receiver_id = $1::uuid))
          ${cursor}
@@ -52,11 +78,12 @@ class Message {
        LIMIT $3`,
       params
     );
-    return rows.reverse();
+    return rows.reverse().map(normalize);
   }
 
   /**
    * All messages in a group, paginated.
+   * NOTE: deleted messages are INCLUDED (with is_deleted flag).
    */
   static async findByGroup(groupId, { limit = 50, before } = {}) {
     const params = [groupId, limit];
@@ -71,13 +98,12 @@ class Message {
        FROM messages m
        JOIN users u ON u.id = m.sender_id
        WHERE m.group_id = $1::uuid
-         AND m.deleted_at IS NULL
          ${cursor}
        ORDER BY m.created_at DESC
        LIMIT $2`,
       params
     );
-    return rows.reverse();
+    return rows.reverse().map(normalize);
   }
 
   /**
@@ -107,7 +133,8 @@ class Message {
        ORDER BY m.created_at ASC`,
       [userId]
     );
-    return rows;
+    // Offline sync: return camelCase so client handler works uniformly
+    return rows.map(normalize);
   }
 
   /**
@@ -138,6 +165,9 @@ class Message {
    */
   static async markManyDelivered(messageIds) {
     if (!messageIds.length) return;
+    // messageIds are already normalized to the DB 'id' field via normalize(),
+    // but findUndelivered now returns normalized rows where id = row.id (not messageId).
+    // We need the original DB ids — fetch via messageId field which maps to 'id'.
     const { rowCount } = await pool.query(
       `UPDATE messages SET status = 'delivered'
        WHERE id = ANY($1::uuid[]) AND status = 'sent'`,
@@ -148,6 +178,7 @@ class Message {
 
   /**
    * Soft-delete (sets deleted_at). Hard delete is not exposed.
+   * Only the sender can delete their own message.
    */
   static async softDelete(messageId, requesterId) {
     const { rows } = await pool.query(
@@ -155,6 +186,17 @@ class Message {
        WHERE id = $1::uuid AND sender_id = $2::uuid
        RETURNING *`,
       [messageId, requesterId]
+    );
+    return normalize(rows[0]) || null;
+  }
+
+  /**
+   * Get the group_id and receiver_id for a message (used to broadcast deletions).
+   */
+  static async getMessageMeta(messageId) {
+    const { rows } = await pool.query(
+      `SELECT id, sender_id, receiver_id, group_id, type FROM messages WHERE id = $1::uuid`,
+      [messageId]
     );
     return rows[0] || null;
   }
