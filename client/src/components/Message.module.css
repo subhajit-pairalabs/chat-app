@@ -1,10 +1,13 @@
+/* Message.module.css */
+
 .wrapper {
   display: flex;
   flex-direction: column;
   max-width: 68%;
+  position: relative; /* needed for absolute menu positioning */
 }
 
-.mine  { align-self: flex-end; align-items: flex-end; }
+.mine   { align-self: flex-end;   align-items: flex-end; }
 .theirs { align-self: flex-start; align-items: flex-start; }
 
 .first { margin-top: 10px; }
@@ -15,6 +18,45 @@
   padding: 0 4px;
   margin-bottom: 3px;
 }
+
+/* Container that holds the bubble + menu trigger side by side */
+.bubbleWrap {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* Show menu trigger only on hover */
+.menuTrigger {
+  opacity: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: opacity 0.12s, background 0.12s;
+  align-self: center;
+  cursor: pointer;
+  border: none;
+  line-height: 1;
+}
+
+.mine   .menuTrigger { order: -1; }    /* left of bubble for own messages  */
+.theirs .menuTrigger { order:  1; }    /* right of bubble for other messages */
+
+.wrapper:hover .menuTrigger,
+.wrapper:focus-within .menuTrigger {
+  opacity: 1;
+}
+
+.menuTrigger:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+/* ── Bubble ─────────────────────────────────────────────────────────────────── */
 
 .bubble {
   display: inline-flex;
@@ -37,12 +79,30 @@
   border: 1px solid var(--border);
 }
 
+/* Deleted message style */
+.deletedBubble {
+  opacity: 0.6;
+}
+
+.mine .deletedBubble {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+}
+
+.deletedText {
+  font-size: 13px;
+  font-style: italic;
+  color: var(--muted);
+}
+
 .content {
   font-size: 14px;
   line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ── Meta row (time + status) ────────────────────────────────────────────── */
 
 .meta {
   display: flex;
@@ -61,4 +121,8 @@
   opacity: 0.65;
 }
 
-.status.read { color: #90caf9; opacity: 1; }
+/* ISSUE 6: Blue ticks for read status */
+.readTick {
+  color: #60a5fa;   /* blue-400 */
+  opacity: 1;
+}

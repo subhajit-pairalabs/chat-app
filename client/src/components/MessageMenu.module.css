@@ -1,0 +1,64 @@
+/* MessageMenu.module.css */
+
+.menu {
+  position: absolute;
+  top: -4px;
+  z-index: 100;
+  background: var(--surface2, #23263a);
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow:
+    0 8px 32px rgba(0,0,0,0.4),
+    0 2px 8px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  min-width: 130px;
+  animation: menuIn 0.12s ease;
+  backdrop-filter: blur(8px);
+}
+
+/* Position right of message for sent, left of message for received */
+.mine  { right: calc(100% + 8px); }
+.theirs { left: calc(100% + 8px); }
+
+@keyframes menuIn {
+  from { opacity: 0; transform: scale(0.92) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--text, #e2e8f0);
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.12s;
+  cursor: pointer;
+  border: none;
+  width: 100%;
+}
+
+.item:hover {
+  background: var(--surface3, rgba(255,255,255,0.07));
+}
+
+.item.danger {
+  color: #f87171;
+}
+
+.item.danger:hover {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}

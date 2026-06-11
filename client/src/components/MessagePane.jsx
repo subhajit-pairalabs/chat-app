@@ -9,15 +9,17 @@ export default function MessagePane() {
   const {
     activeId,
     activeType,
-    activeConversation,  // FIX BUG-05B: use resolved name from context
+    activeConversation,
     messages,
     sendMessage,
+    deleteMessage,
     sendTyping,
     typing,
     onlineUsers
   } = useChat();
 
   const [input, setInput] = useState('');
+  const [replyTo, setReplyTo] = useState(null);   // message being replied to
   const bottomRef     = useRef(null);
   const typingTimeout = useRef(null);
 
@@ -26,11 +28,10 @@ export default function MessagePane() {
   // Determine who is typing in this conversation
   const isTyping = Object.entries(typing).some(([key, t]) => {
     if (!t) return false;
-    if (activeType === 'group') return key === activeId; // group typing key
-    return key !== user.id; // private: any other user typing
+    if (activeType === 'group') return key === activeId;
+    return key !== user.id;
   });
 
-  // FIX BUG-05B: display the resolved name
   const headerName = activeType === 'group'
     ? (activeConversation?.group_name || 'Group')
     : (activeConversation?.other_username || '…');
@@ -42,23 +43,32 @@ export default function MessagePane() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [paneMessages.length]);
 
-  // FIX: cleanup typing timeout on unmount
+  // Cleanup typing timeout on unmount
   useEffect(() => {
     return () => clearTimeout(typingTimeout.current);
   }, []);
 
+  // ── Send ──────────────────────────────────────────────────────────────────
   const handleSend = useCallback(() => {
     if (!input.trim()) return;
-    sendMessage(input);
+    // Prepend reply quote if replying
+    const fullContent = replyTo
+      ? `> ${replyTo.content}\n\n${input.trim()}`
+      : input.trim();
+    sendMessage(fullContent);
     setInput('');
+    setReplyTo(null);
     sendTyping(false);
     clearTimeout(typingTimeout.current);
-  }, [input, sendMessage, sendTyping]);
+  }, [input, replyTo, sendMessage, sendTyping]);
 
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+    if (e.key === 'Escape' && replyTo) {
+      setReplyTo(null);
     }
   }
 
@@ -68,6 +78,18 @@ export default function MessagePane() {
     clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => sendTyping(false), 1500);
   }
+
+  // ── Delete handler ────────────────────────────────────────────────────────
+  const handleDelete = useCallback((messageId) => {
+    if (window.confirm('Delete this message for everyone?')) {
+      deleteMessage(messageId);
+    }
+  }, [deleteMessage]);
+
+  // ── Reply handler ─────────────────────────────────────────────────────────
+  const handleReply = useCallback((msg) => {
+    setReplyTo(msg);
+  }, []);
 
   // Group consecutive messages by same sender
   const grouped = paneMessages.reduce((acc, msg, i) => {
@@ -86,7 +108,6 @@ export default function MessagePane() {
           {isOnline && <span className={styles.onlineDot} />}
         </div>
         <div>
-          {/* FIX BUG-05B: show resolved name */}
           <div className={styles.headerName}>{headerName}</div>
           <div className={styles.headerSub}>
             {activeType === 'group'
@@ -107,6 +128,8 @@ export default function MessagePane() {
             key={msg.messageId || msg.id}
             msg={msg}
             isMine={msg.senderId === user.id}
+            onDelete={handleDelete}
+            onReply={handleReply}
           />
         ))}
         {isTyping && (
@@ -116,6 +139,19 @@ export default function MessagePane() {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {/* Reply preview bar */}
+      {replyTo && (
+        <div className={styles.replyBar}>
+          <div className={styles.replyContent}>
+            <span className={styles.replyLabel}>Replying to</span>
+            <span className={styles.replyText}>
+              {replyTo.content?.slice(0, 80)}{replyTo.content?.length > 80 ? '…' : ''}
+            </span>
+          </div>
+          <button className={styles.replyClose} onClick={() => setReplyTo(null)} title="Cancel reply">×</button>
+        </div>
+      )}
 
       {/* Input */}
       <div className={styles.inputRow}>
